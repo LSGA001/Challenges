@@ -46,12 +46,32 @@ import pickle as pkl
 
 import unicodedata
 
-# Reads the first 1000 data points and prints the first 5.
-df = pd.read_csv("/home/leonardo/Desktop/Data/train.csv", index_col=False,
-    nrows=200000)
-print("\nFirst five data points:\n{}\n".format(df.head()))
+import dask
+import dask.dataframe as dd
+# If Sample is true only a portion of train.csv will be used
 
-path = untar_data(URLs.MNIST_SAMPLE)
-data = ImageDataBunch.from_folder(path)
-learn = cnn_learner(data, models.resnet18, metrics=accuracy)
-learn.fit(1)
+SAMPLE = True
+PATH = Path('/home/leonardo/Desktop/Data/sample') if SAMPLE else Path(
+    '/home/leonardo/Desktop/Data')
+PATH.mkdir(exist_ok=True)
+
+MODELS_PATH = PATH / 'models'
+MODELS_PATH.mkdir(exist_ok=True)
+
+def normalize_title(title):
+    return unicodedata.normalize('NFKD', title.lower()).encode(
+        'ASCII', 'ignore').decode('utf8')
+
+from sklearn.model_selection import train_test_split
+
+if not (PATH / 'train_prepro.csv').exists() or True:
+    df = pd.read_csv(PATH / 'train.csv')
+
+    if SAMPLE:
+        _, df = train_test_split(df, test_size=int(0.01*len(df)),
+            random_state=42, stratify=df.category)
+
+    df['title'] = df.title.apply(normalize_title)
+    df = df[~df.title.isna() & (df.title != 'nan') & (df.title != '')]
+
+    df.to_csv(PATH / 'train_prepro.csv', index=False)
