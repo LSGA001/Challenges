@@ -49,53 +49,52 @@ import unicodedata
 import dask
 import dask.dataframe as dd
 
-# If Sample is true only a portion of train.csv will be used
+path = untar_data(URLs.IMDB_SAMPLE)
+print(path)
 
-SAMPLE = True
-PATH = Path('/home/leonardo/Desktop/Data/sample') if SAMPLE else Path(
-    '/home/leonardo/Desktop/Data')
-PATH.mkdir(exist_ok=True)
-
-MODELS_PATH = PATH / 'models'
-MODELS_PATH.mkdir(exist_ok=True)
-
-def normalize_title(title):
-    return unicodedata.normalize('NFKD', title.lower()).encode(
-        'ASCII', 'ignore').decode('utf8')
-
-from sklearn.model_selection import train_test_split
-
-if not (PATH / 'train_prepro.csv').exists():
-    df = pd.read_csv(PATH / 'train.csv')
-
-    if SAMPLE:
-        _, df = train_test_split(df, test_size=int(0.01*len(df)),
-            random_state=42, stratify=df.category)
-
-    df['title'] = df.title.apply(normalize_title)
-    df = df[~df.title.isna() & (df.title != 'nan') & (df.title != '')]
-
-    df.to_csv(PATH / 'train_prepro.csv', index=False)
+df = pd.read_csv(path/'texts.csv')
+print(df.head())
+"""
+# Language model data
+data_lm = TextLMDataBunch.from_csv(path, 'texts.csv')
+# Classifier model data
+data_clas = TextClasDataBunch.from_csv(path, 'texts.csv', vocab=data_lm.train_ds.vocab, bs=32)
 
 
-if not (PATH / 'data_lm_export.pkl').exists():
-    data_lm = TextLMDataBunch.from_csv(
-        PATH, 'train_prepro.csv', text_cols='title', label_cols='category',
-        valid_pct=0.05, max_vocab=100000, bs=64)
+data_lm.save('data_lm_export.pkl')
+data_clas.save('data_clas_export.pkl')
+"""
 
-    data_lm.save('data_lm_export.pkl')
-else:
-    print('Loading databunch...')
-    data_lm = load_data(PATH, 'data_lm_export.pkl')
+data_lm = load_data(path, 'data_lm_export.pkl')
+data_clas = load_data(path, 'data_clas_export.pkl', bs=16)
 
-learn = language_model_learner(data_lm, AWD_LSTM, drop_mult=0.05, pretrained=False)
+"""
+learn = language_model_learner(data_lm, AWD_LSTM, drop_mult=0.5)
+learn.fit_one_cycle(1, 1e-2)
 
-print('Finding learning rate...')
-learn.lr_find()
-learn.recorder.plot(skip_end=20, skip_start=40, suggestion=True)
+learn.unfreeze()
+learn.fit_one_cycle(1, 1e-3)
 
-learn.fit_one_cycle(
-    10, 3e-3, callbacks=[SaveModelCallback(learn, every='epoch',
-        monitor='accuracy', name='lm')])
+learn.predict("This is a review about", n_words=10)
+print(learn.predict("This is a review about", n_words=10))
 
-learn.save_encoder('lm_enc')
+learn.save_encoder('ft_enc')
+"""
+
+learn = text_classifier_learner(data_clas, AWD_LSTM, drop_mult=0.5)
+learn.load_encoder('ft_enc')
+data_clas.show_batch()
+print(data_clas.show_batch())
+
+learn.fit_one_cycle(1, 1e-2)
+
+learn.freeze_to(-2)
+learn.fit_one_cycle(1, slice(5e-3/2., 5e-3))
+
+learn.unfreeze()
+learn.fit_one_cycle(1, slice(2e-3/100, 2e-3))
+
+learn.predict("This was a great movie!")
+print(learn.predict("This was a great movie!"))
+
+learn.save('lm')
